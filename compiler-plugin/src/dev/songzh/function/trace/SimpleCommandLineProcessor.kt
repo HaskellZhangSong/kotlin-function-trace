@@ -21,7 +21,7 @@ class SimpleCommandLineProcessor : CommandLineProcessor {
             optionName = "packagePath",
             valueDescription = "<fully.qualified.package>",
             description = "Package that contains _funcTraceEnter / _funcTraceExit. " +
-                    "Defaults to 'org.demiurg906.kotlin.plugin'.",
+                    "Defaults to 'dev.songzh.function.trace'.",
             required = false,
         ),
     )
