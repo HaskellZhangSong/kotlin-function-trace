@@ -11,7 +11,8 @@ import org.jetbrains.kotlin.gradle.plugin.SubpluginOption
 @Suppress("unused") // Used via reflection.
 class SimpleGradlePlugin : KotlinCompilerPluginSupportPlugin {
     override fun apply(target: Project) {
-        target.extensions.create("simplePlugin", SimpleGradleExtension::class.java)
+        // Expose the DSL block as `functionTracer { … }` in user build scripts.
+        target.extensions.create("functionTracer", SimpleGradleExtension::class.java)
     }
 
     override fun isApplicable(kotlinCompilation: KotlinCompilation<*>): Boolean = true
@@ -29,6 +30,7 @@ class SimpleGradlePlugin : KotlinCompilerPluginSupportPlugin {
     ): Provider<List<SubpluginOption>> {
         val project = kotlinCompilation.target.project
 
+        // Add the annotations + runtime library to the compilation's compile classpath.
         kotlinCompilation.dependencies { implementation(ANNOTATIONS_LIBRARY_COORDINATES) }
         if (kotlinCompilation.implementationConfigurationName == "metadataCompilationImplementation") {
             project.dependencies.add("commonMainImplementation", ANNOTATIONS_LIBRARY_COORDINATES)
@@ -36,8 +38,10 @@ class SimpleGradlePlugin : KotlinCompilerPluginSupportPlugin {
 
         return project.provider {
             val extension = project.extensions.getByType(SimpleGradleExtension::class.java)
-
-            emptyList()
+            listOf(
+                SubpluginOption(key = "traceAll", value = extension.traceAll.get().toString()),
+                SubpluginOption(key = "packagePath", value = extension.packagePath.get()),
+            )
         }
     }
 }
