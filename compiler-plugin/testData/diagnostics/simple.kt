@@ -1,6 +1,6 @@
 package foo.bar
 
-import org.demiurg906.kotlin.plugin.SomeAnnotation
+import dev.songzh.function.trace.SomeAnnotation
 
 @SomeAnnotation
 fun test() {

@@ -6,6 +6,6 @@ plugins {
 }
 
 allprojects {
-    group = "org.demiurg906.kotlin.plugin"
+    group = "dev.songzh.function.trace"
     version = "0.1"
 }
