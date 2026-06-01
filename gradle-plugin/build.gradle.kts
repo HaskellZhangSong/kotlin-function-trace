@@ -2,6 +2,7 @@ plugins {
     kotlin("jvm")
     id("com.github.gmazzo.buildconfig")
     id("java-gradle-plugin")
+    `maven-publish`
 }
 
 sourceSets {
