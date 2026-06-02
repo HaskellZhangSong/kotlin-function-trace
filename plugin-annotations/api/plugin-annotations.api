@@ -1,6 +1,3 @@
-public abstract interface annotation class dev/songzh/function/trace/SomeAnnotation : java/lang/annotation/Annotation {
-}
-
 public abstract interface annotation class dev/songzh/function/trace/Trace : java/lang/annotation/Annotation {
 }
 

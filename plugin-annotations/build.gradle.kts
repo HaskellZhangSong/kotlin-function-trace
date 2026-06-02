@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
-import org.jetbrains.kotlin.gradle.targets.js.dsl.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 
 plugins {
     kotlin("multiplatform")
@@ -46,4 +46,32 @@ kotlin {
     watchosX64()
 
     applyDefaultHierarchyTemplate()
+}
+
+publishing {
+    publications.withType<MavenPublication>().configureEach {
+        pom {
+            name.set("Function Tracer Kotlin Compiler Plugin — Annotations")
+            description.set("Multiplatform annotations and default trace-hook implementations for the Function Tracer Kotlin compiler plugin.")
+            url.set("https://github.com/songzhh/function-tracer-kotlin")
+            licenses {
+                license {
+                    name.set("Apache License 2.0")
+                    url.set("https://www.apache.org/licenses/LICENSE-2.0")
+                }
+            }
+            developers {
+                developer {
+                    id.set("songzh")
+                    name.set("Song Zheng")
+                    url.set("https://github.com/songzhh")
+                }
+            }
+            scm {
+                url.set("https://github.com/songzhh/function-tracer-kotlin")
+                connection.set("scm:git:git://github.com/songzhh/function-tracer-kotlin.git")
+                developerConnection.set("scm:git:ssh://github.com/songzhh/function-tracer-kotlin.git")
+            }
+        }
+    }
 }

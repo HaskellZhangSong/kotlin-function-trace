@@ -24,7 +24,7 @@ The default implementations (shipped in `plugin-annotations`) print to stdout:
 
 | Module | Purpose |
 |---|---|
-| `compiler-plugin` | K2 compiler plugin (FIR + IR passes) |
+| `compiler-plugin` | K2 compiler plugin (IR pass) |
 | `gradle-plugin` | Gradle plugin that wires the compiler plugin into any Kotlin build |
 | `plugin-annotations` | Multiplatform library with the `@Trace` annotation and default `_funcTraceEnter`/`_funcTraceExit` implementations |
 
@@ -48,7 +48,7 @@ pluginManagement {
 // build.gradle.kts
 plugins {
     kotlin("jvm") version "2.1.20"
-    id("dev.songzh.function.trace") version "0.1"
+    id("dev.songzh.function.trace") version "0.1.0"
 }
 ```
 
@@ -150,8 +150,8 @@ fun _funcTraceExit(functionName: String) {
 |---|---|
 | `ir/FunctionTracerTransformer.kt` | Core IR transformer — injects `_funcTraceEnter` / `_funcTraceExit` |
 | `ir/FunctionTracerIrGenerationExtension.kt` | Registers the transformer as an IR generation extension |
-| `SimplePluginComponentRegistrar.kt` | Reads `traceAll` / `packagePath` from compiler config and registers extensions |
-| `SimpleCommandLineProcessor.kt` | Exposes `traceAll` and `packagePath` as `-P plugin:…` compiler options |
+| `FunctionTracerPluginRegistrar.kt` | Reads `traceAll` / `packagePath` from compiler config and registers extensions |
+| `FunctionTracerCommandLineProcessor.kt` | Exposes `traceAll` and `packagePath` as `-P plugin:…` compiler options |
 
 ---
 
@@ -173,3 +173,25 @@ This regenerates the JUnit 5 test-class files under `test-gen/`. Run all tests w
 ```bash
 ./gradlew :compiler-plugin:test
 ```
+
+---
+
+## Publishing
+
+To publish all artifacts to your local Maven repository for testing:
+
+```bash
+./gradlew publishToMavenLocal
+```
+
+To publish to Maven Central, configure your credentials in `~/.gradle/gradle.properties` and run:
+
+```bash
+./gradlew publish
+```
+
+---
+
+## License
+
+Copyright 2024 Song Zheng. Licensed under the [Apache License 2.0](LICENSE).

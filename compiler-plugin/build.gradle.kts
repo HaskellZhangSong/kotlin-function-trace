@@ -1,6 +1,5 @@
 plugins {
     kotlin("jvm")
-    `java-test-fixtures`
     id("com.github.gmazzo.buildconfig")
     `maven-publish`
 }
@@ -10,32 +9,16 @@ sourceSets {
         java.setSrcDirs(listOf("src"))
         resources.setSrcDirs(listOf("resources"))
     }
-    testFixtures {
-        java.setSrcDirs(listOf("test-fixtures"))
-    }
     test {
-        java.setSrcDirs(listOf("test", "test-gen"))
+        java.setSrcDirs(listOf("test"))
         resources.setSrcDirs(listOf("testResources"))
     }
 }
 
-val annotationsRuntimeClasspath: Configuration by configurations.creating { isTransitive = false }
-
 dependencies {
     compileOnly(kotlin("compiler"))
-
-    testFixturesApi(kotlin("test-junit5"))
-    testFixturesApi(kotlin("compiler-internal-test-framework"))
-    testFixturesApi(kotlin("compiler"))
-
-    annotationsRuntimeClasspath(project(":plugin-annotations"))
-
-    // Dependencies required to run the internal test framework.
-    testRuntimeOnly("junit:junit:4.13.2")
+    testImplementation(kotlin("test-junit5"))
     testRuntimeOnly(kotlin("reflect"))
-    testRuntimeOnly(kotlin("test"))
-    testRuntimeOnly(kotlin("script-runtime"))
-    testRuntimeOnly(kotlin("annotations-jvm"))
 }
 
 buildConfig {
@@ -48,20 +31,7 @@ buildConfig {
 }
 
 tasks.test {
-    dependsOn(annotationsRuntimeClasspath)
-
     useJUnitPlatform()
-    workingDir = rootDir
-
-    systemProperty("annotationsRuntime.classpath", annotationsRuntimeClasspath.asPath)
-
-    // Properties required to run the internal test framework.
-    setLibraryProperty("org.jetbrains.kotlin.test.kotlin-stdlib", "kotlin-stdlib")
-    setLibraryProperty("org.jetbrains.kotlin.test.kotlin-stdlib-jdk8", "kotlin-stdlib-jdk8")
-    setLibraryProperty("org.jetbrains.kotlin.test.kotlin-reflect", "kotlin-reflect")
-    setLibraryProperty("org.jetbrains.kotlin.test.kotlin-test", "kotlin-test")
-    setLibraryProperty("org.jetbrains.kotlin.test.kotlin-script-runtime", "kotlin-script-runtime")
-    setLibraryProperty("org.jetbrains.kotlin.test.kotlin-annotations-jvm", "kotlin-annotations-jvm")
 }
 
 kotlin {
@@ -71,37 +41,40 @@ kotlin {
     }
 }
 
-val generateTests by tasks.registering(JavaExec::class) {
-    inputs.dir(layout.projectDirectory.dir("testData"))
-        .withPropertyName("testData")
-        .withPathSensitivity(PathSensitivity.RELATIVE)
-    outputs.dir(layout.projectDirectory.dir("test-gen"))
-        .withPropertyName("generatedTests")
-
-    classpath = sourceSets.testFixtures.get().runtimeClasspath
-    mainClass.set("dev.songzh.function.trace.GenerateTestsKt")
-    workingDir = rootDir
-}
-
-tasks.compileTestKotlin {
-    dependsOn(generateTests)
-}
-
-fun Test.setLibraryProperty(propName: String, jarName: String) {
-    val path = project.configurations
-        .testRuntimeClasspath.get()
-        .files
-        .find { """$jarName-\d.*jar""".toRegex().matches(it.name) }
-        ?.absolutePath
-        ?: return
-    systemProperty(propName, path)
+val sourcesJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("sources")
+    from(sourceSets.main.get().allSource)
 }
 
 publishing {
     publications {
         create<MavenPublication>("maven") {
             from(components["java"])
+            artifact(sourcesJar)
             artifactId = "compiler-plugin"
+            pom {
+                name.set("Function Tracer Kotlin Compiler Plugin — Compiler Plugin")
+                description.set("K2 compiler plugin that injects entry/exit trace calls into Kotlin function bodies at compile time.")
+                url.set("https://github.com/songzhh/function-tracer-kotlin")
+                licenses {
+                    license {
+                        name.set("Apache License 2.0")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0")
+                    }
+                }
+                developers {
+                    developer {
+                        id.set("songzh")
+                        name.set("Song Zheng")
+                        url.set("https://github.com/songzhh")
+                    }
+                }
+                scm {
+                    url.set("https://github.com/songzhh/function-tracer-kotlin")
+                    connection.set("scm:git:git://github.com/songzhh/function-tracer-kotlin.git")
+                    developerConnection.set("scm:git:ssh://github.com/songzhh/function-tracer-kotlin.git")
+                }
+            }
         }
     }
 }

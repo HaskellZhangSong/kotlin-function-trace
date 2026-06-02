@@ -9,10 +9,10 @@ import org.jetbrains.kotlin.gradle.plugin.SubpluginArtifact
 import org.jetbrains.kotlin.gradle.plugin.SubpluginOption
 
 @Suppress("unused") // Used via reflection.
-class SimpleGradlePlugin : KotlinCompilerPluginSupportPlugin {
+class FunctionTracerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     override fun apply(target: Project) {
         // Expose the DSL block as `functionTracer { … }` in user build scripts.
-        target.extensions.create("functionTracer", SimpleGradleExtension::class.java)
+        target.extensions.create("functionTracer", FunctionTracerGradleExtension::class.java)
     }
 
     override fun isApplicable(kotlinCompilation: KotlinCompilation<*>): Boolean = true
@@ -37,7 +37,7 @@ class SimpleGradlePlugin : KotlinCompilerPluginSupportPlugin {
         }
 
         return project.provider {
-            val extension = project.extensions.getByType(SimpleGradleExtension::class.java)
+            val extension = project.extensions.getByType(FunctionTracerGradleExtension::class.java)
             listOf(
                 SubpluginOption(key = "traceAll", value = extension.traceAll.get().toString()),
                 SubpluginOption(key = "packagePath", value = extension.packagePath.get()),

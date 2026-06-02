@@ -8,19 +8,17 @@ import dev.songzh.function.trace.ir.FunctionTracerIrGenerationExtension
 /** Default package shipped with plugin-annotations. */
 private const val DEFAULT_PACKAGE_PATH = "dev.songzh.function.trace"
 
-class SimplePluginComponentRegistrar : CompilerPluginRegistrar() {
+@Suppress("unused") // Used via reflection.
+class FunctionTracerPluginRegistrar : CompilerPluginRegistrar() {
     override val supportsK2: Boolean
         get() = true
 
     override fun ExtensionStorage.registerExtensions(configuration: CompilerConfiguration) {
-        val traceAll = configuration.get(_root_ide_package_.dev.songzh.function.trace.FunctionTracerConfigurationKeys.TRACE_ALL, false)
-        val packagePath = configuration.get(
-            _root_ide_package_.dev.songzh.function.trace.FunctionTracerConfigurationKeys.PACKAGE_PATH,
-            _root_ide_package_.dev.songzh.function.trace.DEFAULT_PACKAGE_PATH
-        )
+        val traceAll = configuration.get(FunctionTracerConfigurationKeys.TRACE_ALL, false)
+        val packagePath = configuration.get(FunctionTracerConfigurationKeys.PACKAGE_PATH, DEFAULT_PACKAGE_PATH)
 
         IrGenerationExtension.registerExtension(
-            _root_ide_package_.dev.songzh.function.trace.ir.FunctionTracerIrGenerationExtension(
+            FunctionTracerIrGenerationExtension(
                 traceAll = traceAll,
                 packagePath = packagePath
             )

@@ -107,7 +107,7 @@ class FunctionTracerTransformer(
         if (declaration.origin == IrDeclarationOrigin.LOCAL_FUNCTION_FOR_LAMBDA) return declaration
 
         val shouldTrace = traceAll ||
-                declaration.hasAnnotation(FqName(_root_ide_package_.dev.songzh.function.trace.ir.TRACE_ANNOTATION_FQ_NAME))
+                declaration.hasAnnotation(FqName(TRACE_ANNOTATION_FQ_NAME))
         if (!shouldTrace) return declaration
 
         val functionName = buildFunctionName(declaration)

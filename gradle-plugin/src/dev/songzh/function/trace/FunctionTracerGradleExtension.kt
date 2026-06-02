@@ -16,11 +16,11 @@ private const val DEFAULT_PACKAGE_PATH = "dev.songzh.function.trace"
  *     traceAll = true
  *
  *     // package that contains _funcTraceEnter / _funcTraceExit
- *     packagePath = "songzh.dev.function.trace"
+ *     packagePath = "dev.songzh.function.trace"
  * }
  * ```
  */
-open class SimpleGradleExtension(objectFactory: ObjectFactory) {
+open class FunctionTracerGradleExtension(objectFactory: ObjectFactory) {
 
     /**
      * When `true`, all non-inline, non-external functions are traced.
@@ -36,5 +36,4 @@ open class SimpleGradleExtension(objectFactory: ObjectFactory) {
     val packagePath: Property<String> =
         objectFactory.property(String::class.java).convention(DEFAULT_PACKAGE_PATH)
 }
-
 
