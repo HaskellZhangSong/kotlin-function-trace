@@ -105,6 +105,11 @@ class FunctionTracerTransformer(
         if (declaration.isInline) return declaration
         if (declaration.isExternal) return declaration
         if (declaration.origin == IrDeclarationOrigin.LOCAL_FUNCTION_FOR_LAMBDA) return declaration
+        // Never instrument the trace hooks themselves — doing so would cause infinite
+        // recursion when traceAll = true and the user supplies their own
+        // _funcTraceEnter / _funcTraceExit implementations.
+        if (declaration.name.asString() == "_funcTraceEnter" ||
+            declaration.name.asString() == "_funcTraceExit") return declaration
 
         val shouldTrace = traceAll ||
                 declaration.hasAnnotation(FqName(TRACE_ANNOTATION_FQ_NAME))
