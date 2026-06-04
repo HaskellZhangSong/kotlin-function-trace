@@ -1,6 +1,5 @@
 package dev.songzh.function.trace
 
-import dev.songzh.function.trace.BuildConfig.ANNOTATIONS_LIBRARY_COORDINATES
 import org.gradle.api.Project
 import org.gradle.api.provider.Provider
 import org.jetbrains.kotlin.gradle.plugin.KotlinCompilation
@@ -30,12 +29,6 @@ class FunctionTracerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     ): Provider<List<SubpluginOption>> {
         val project = kotlinCompilation.target.project
 
-        // Add the annotations + runtime library to the compilation's compile classpath.
-        kotlinCompilation.dependencies { implementation(ANNOTATIONS_LIBRARY_COORDINATES) }
-        if (kotlinCompilation.implementationConfigurationName == "metadataCompilationImplementation") {
-            project.dependencies.add("commonMainImplementation", ANNOTATIONS_LIBRARY_COORDINATES)
-        }
-
         return project.provider {
             val extension = project.extensions.getByType(FunctionTracerGradleExtension::class.java)
             listOf(
@@ -45,3 +38,5 @@ class FunctionTracerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         }
     }
 }
+
+

@@ -1,8 +1,0 @@
-public abstract interface annotation class dev/songzh/function/trace/Trace : java/lang/annotation/Annotation {
-}
-
-public final class dev/songzh/function/trace/TraceRuntimeKt {
-	public static final fun _funcTraceEnter (Ljava/lang/String;)V
-	public static final fun _funcTraceExit (Ljava/lang/String;)V
-}
-

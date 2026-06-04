@@ -8,5 +8,5 @@ plugins {
 
 allprojects {
     group = "dev.songzh.function.trace"
-    version = "0.1.0"
+    version = "0.2.0"
 }

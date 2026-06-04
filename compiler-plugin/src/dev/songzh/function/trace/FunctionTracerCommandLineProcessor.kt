@@ -13,8 +13,8 @@ class FunctionTracerCommandLineProcessor : CommandLineProcessor {
         CliOption(
             optionName = "traceAll",
             valueDescription = "<true|false>",
-            description = "When true, every non-inline function is traced; " +
-                    "when false (default) only functions annotated with @Trace are traced.",
+            description = "When true (default), every non-inline function is traced; " +
+                    "when false, tracing is disabled entirely.",
             required = false,
         ),
         CliOption(

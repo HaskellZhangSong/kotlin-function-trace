@@ -24,7 +24,6 @@ import org.jetbrains.kotlin.ir.expressions.IrReturn
 import org.jetbrains.kotlin.ir.expressions.impl.*
 import org.jetbrains.kotlin.ir.symbols.IrReturnTargetSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
-import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.name.CallableId
@@ -32,9 +31,6 @@ import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 
 private enum class EntryOrExit { ENTRY, EXIT }
-
-/** FQ name of the @Trace annotation defined in plugin-annotations. */
-private const val TRACE_ANNOTATION_FQ_NAME = "dev.songzh.function.trace.Trace"
 
 /**
  * IR transformer that wraps function bodies with entry/exit trace calls.
@@ -45,11 +41,8 @@ private const val TRACE_ANNOTATION_FQ_NAME = "dev.songzh.function.trace.Trace"
  *     that calls `_funcTraceExit("<fqName>")` just before the return value
  *     is produced.
  *
- * A function is selected for tracing when either:
- *  - `traceAll == true`, or
- *  - the function carries the `@Trace` annotation.
- *
- * Inline and external functions are always skipped.
+ * A function is selected for tracing when `traceAll == true` (the default).
+ * Inline, external, and lambda functions are always skipped.
  */
 class FunctionTracerTransformer(
     private val pluginContext: IrPluginContext,
@@ -111,8 +104,7 @@ class FunctionTracerTransformer(
         if (declaration.name.asString() == "_funcTraceEnter" ||
             declaration.name.asString() == "_funcTraceExit") return declaration
 
-        val shouldTrace = traceAll ||
-                declaration.hasAnnotation(FqName(TRACE_ANNOTATION_FQ_NAME))
+        val shouldTrace = traceAll
         if (!shouldTrace) return declaration
 
         val functionName = buildFunctionName(declaration)

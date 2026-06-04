@@ -9,9 +9,8 @@ import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 /**
  * Registers [FunctionTracerTransformer] as an IR generation extension.
  *
- * @param traceAll    When `true`, every non-inline, non-external function in the
- *                    module is instrumented.  When `false` (default), only functions
- *                    carrying the `@Trace` annotation are instrumented.
+ * @param traceAll    When `true` (default), every non-inline, non-external function in the
+ *                    module is instrumented.  When `false`, tracing is disabled entirely.
  * @param packagePath Fully-qualified package name that contains `_funcTraceEnter`
  *                    and `_funcTraceExit`.
  * @param messageCollector Optional message collector for reporting plugin diagnostics.

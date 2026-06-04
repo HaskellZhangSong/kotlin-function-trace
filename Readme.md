@@ -11,7 +11,7 @@ For every traced function the plugin rewrites its IR body so that:
 1. `_funcTraceEnter("<package.ClassName.functionName>")` is called at the very start.
 2. `_funcTraceExit("<package.ClassName.functionName>")` is called just before every return path.
 
-The default implementations (shipped in `plugin-annotations`) print to stdout:
+You supply the implementations of these two functions — the plugin is fully platform-agnostic and places no constraints on what the hooks do (print, log to a file, send to a telemetry backend, etc.).
 
 ```
 >>> [TRACE] Entering com.example.Greeter.greet
@@ -26,7 +26,6 @@ The default implementations (shipped in `plugin-annotations`) print to stdout:
 |---|---|
 | `compiler-plugin` | K2 compiler plugin (IR pass) |
 | `gradle-plugin` | Gradle plugin that wires the compiler plugin into any Kotlin build |
-| `plugin-annotations` | Multiplatform library with the `@Trace` annotation and default `_funcTraceEnter`/`_funcTraceExit` implementations |
 
 ---
 
@@ -48,70 +47,52 @@ pluginManagement {
 // build.gradle.kts
 plugins {
     kotlin("jvm") version "2.1.20"
-    id("dev.songzh.function.trace") version "0.1.0"
+    id("dev.songzh.function.trace") version "0.2.0"
 }
 ```
 
-The plugin automatically adds `plugin-annotations` to your compile classpath, so no extra `dependencies` entry is needed.
+### 2. Supply the trace hook functions
 
-### 2. Configure the plugin
+Define `_funcTraceEnter` and `_funcTraceExit` in the package declared by `packagePath` (defaults to `dev.songzh.function.trace`):
+
+```kotlin
+// e.g. src/main/kotlin/dev/songzh/function/trace/TraceHooks.kt
+package dev.songzh.function.trace
+
+fun _funcTraceEnter(functionName: String) {
+    println(">>> [TRACE] Entering $functionName")
+}
+
+fun _funcTraceExit(functionName: String) {
+    println("<<< [TRACE] Exiting $functionName")
+}
+```
+
+> The plugin does **not** bundle any runtime hooks, keeping it platform-neutral. Wire in any logging backend (Timber, SLF4J, OpenTelemetry, `NSLog`, etc.) without pulling in unwanted dependencies.
+
+### 3. Configure the plugin (optional)
 
 ```kotlin
 // build.gradle.kts
 functionTracer {
-    // false (default) → only functions annotated with @Trace are instrumented
-    // true            → every non-inline, non-external function is instrumented
+    // true (default) → every non-inline, non-external function is instrumented
+    // false          → tracing is disabled entirely
     traceAll = true
 
-    // Optional: point at your own runtime package (must contain _funcTraceEnter / _funcTraceExit)
-    // Defaults to the implementations shipped with plugin-annotations.
+    // Package that contains your _funcTraceEnter / _funcTraceExit implementations.
+    // Defaults to "dev.songzh.function.trace".
     packagePath = "dev.songzh.function.trace"
 }
 ```
-
-### 3. Annotate selectively (when `traceAll = false`)
-
-```kotlin
-import dev.songzh.function.trace.Trace
-
-class Greeter {
-    @Trace
-    fun greet(name: String): String {
-        return "Hello, $name!"
-    }
-
-    // Not traced (no annotation, traceAll is false)
-    fun helper() { }
-}
-```
-
-With `traceAll = true` every non-inline function is traced automatically — no annotation required.
 
 ---
 
 ## Custom trace runtime
 
-By default the plugin calls the `println`-based hooks that ship with `plugin-annotations`:
-
-```kotlin
-// dev.songzh.function.trace (plugin-annotations)
-public fun _funcTraceEnter(functionName: String) {
-    println(">>> [TRACE] Entering $functionName")
-}
-
-public fun _funcTraceExit(functionName: String) {
-    println("<<< [TRACE] Exiting $functionName")
-}
-```
-
-To use a custom sink (e.g. structured logging, file output, Android `Log`):
-
-1. Define your own `_funcTraceEnter` / `_funcTraceExit` in a package of your choice.
-2. Set `packagePath` in the Gradle configuration to that package:
+Point the plugin at any package that contains `_funcTraceEnter` / `_funcTraceExit`:
 
 ```kotlin
 functionTracer {
-    traceAll = true
     packagePath = "com.example.mytrace"
 }
 ```
@@ -129,18 +110,20 @@ fun _funcTraceExit(functionName: String) {
 }
 ```
 
+The two functions **must not** themselves be traced (the plugin automatically skips functions named `_funcTraceEnter` / `_funcTraceExit` to prevent infinite recursion).
+
 ---
 
 ## What gets traced
 
 | Scenario | Traced? |
 |---|---|
-| Regular function (`traceAll = true`) | ✅ |
-| Function annotated with `@Trace` (`traceAll = false`) | ✅ |
+| Regular function (`traceAll = true`, the default) | ✅ |
 | `inline` function | ❌ always skipped |
 | `external` function | ❌ always skipped |
 | Lambda / anonymous function | ❌ always skipped |
 | Constructor | ❌ always skipped |
+| `_funcTraceEnter` / `_funcTraceExit` themselves | ❌ always skipped |
 
 ---
 
@@ -152,27 +135,6 @@ fun _funcTraceExit(functionName: String) {
 | `ir/FunctionTracerIrGenerationExtension.kt` | Registers the transformer as an IR generation extension |
 | `FunctionTracerPluginRegistrar.kt` | Reads `traceAll` / `packagePath` from compiler config and registers extensions |
 | `FunctionTracerCommandLineProcessor.kt` | Exposes `traceAll` and `packagePath` as `-P plugin:…` compiler options |
-
----
-
-## Tests
-
-The Kotlin compiler test framework is set up under `compiler-plugin/testData`.
-
-- **Box tests** (`testData/box/`) — compile and run a snippet; must return `"OK"`.
-- **Diagnostic tests** (`testData/diagnostics/`) — verify FIR diagnostics against golden `.fir.txt` files.
-
-To add a new test, place a `.kt` file in the appropriate directory and run:
-
-```bash
-./gradlew :compiler-plugin:generateTests
-```
-
-This regenerates the JUnit 5 test-class files under `test-gen/`. Run all tests with:
-
-```bash
-./gradlew :compiler-plugin:test
-```
 
 ---
 
