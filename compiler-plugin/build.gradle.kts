@@ -1,12 +1,12 @@
 plugins {
     kotlin("jvm")
-    id("com.github.gmazzo.buildconfig")
     `maven-publish`
 }
 
 sourceSets {
     main {
         java.setSrcDirs(listOf("src"))
+        java.srcDir(layout.buildDirectory.dir("generated/buildconfig/src"))
         resources.setSrcDirs(listOf("resources"))
     }
     test {
@@ -15,19 +15,32 @@ sourceSets {
     }
 }
 
+val generateBuildConfig by tasks.registering {
+    val outputDir = layout.buildDirectory.dir("generated/buildconfig/src")
+    val pluginId = rootProject.group.toString()
+    inputs.property("pluginId", pluginId)
+    outputs.dir(outputDir)
+    doLast {
+        val dir = outputDir.get().asFile.resolve("dev/songzh/function/trace")
+        dir.mkdirs()
+        dir.resolve("BuildConfig.kt").writeText(
+            """
+            package dev.songzh.function.trace
+
+            internal object BuildConfig {
+                const val KOTLIN_PLUGIN_ID: String = "$pluginId"
+            }
+            """.trimIndent()
+        )
+    }
+}
+
+tasks.named("compileKotlin") { dependsOn(generateBuildConfig) }
+
 dependencies {
     compileOnly(kotlin("compiler"))
     testImplementation(kotlin("test-junit5"))
     testRuntimeOnly(kotlin("reflect"))
-}
-
-buildConfig {
-    useKotlinOutput {
-        internalVisibility = true
-    }
-
-    packageName(group.toString())
-    buildConfigField("String", "KOTLIN_PLUGIN_ID", "\"${rootProject.group}\"")
 }
 
 tasks.test {
@@ -38,7 +51,13 @@ kotlin {
     compilerOptions {
         optIn.add("org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi")
         optIn.add("org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI")
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
     }
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    sourceCompatibility = "11"
+    targetCompatibility = "11"
 }
 
 val sourcesJar by tasks.registering(Jar::class) {
@@ -55,7 +74,7 @@ publishing {
             pom {
                 name.set("Function Tracer Kotlin Compiler Plugin — Compiler Plugin")
                 description.set("K2 compiler plugin that injects entry/exit trace calls into Kotlin function bodies at compile time.")
-                url.set("https://github.com/songzhh/function-tracer-kotlin")
+                url.set("https://github.com/HaskellZhangSong/kotlin-function-trace/")
                 licenses {
                     license {
                         name.set("Apache License 2.0")
@@ -65,14 +84,14 @@ publishing {
                 developers {
                     developer {
                         id.set("songzh")
-                        name.set("Song Zheng")
-                        url.set("https://github.com/songzhh")
+                        name.set("Song Zhang")
+                        url.set("https://github.com/HaskellZhangSong")
                     }
                 }
                 scm {
-                    url.set("https://github.com/songzhh/function-tracer-kotlin")
-                    connection.set("scm:git:git://github.com/songzhh/function-tracer-kotlin.git")
-                    developerConnection.set("scm:git:ssh://github.com/songzhh/function-tracer-kotlin.git")
+                    url.set("https://github.com/HaskellZhangSong/kotlin-function-trace/")
+                    connection.set("scm:git:git@github.com:HaskellZhangSong/kotlin-function-trace.git")
+                    developerConnection.set("scm:git:ssh://github.com/HaskellZhangSong/kotlin-function-trace.git")
                 }
             }
         }

@@ -1,6 +1,5 @@
 plugins {
     kotlin("jvm")
-    id("com.github.gmazzo.buildconfig")
     id("java-gradle-plugin")
     `maven-publish`
 }
@@ -8,6 +7,7 @@ plugins {
 sourceSets {
     main {
         java.setSrcDirs(listOf("src"))
+        java.srcDir(layout.buildDirectory.dir("generated/buildconfig/src"))
         resources.setSrcDirs(listOf("resources"))
     }
     test {
@@ -16,23 +16,52 @@ sourceSets {
     }
 }
 
+val generateBuildConfig by tasks.registering {
+    val outputDir = layout.buildDirectory.dir("generated/buildconfig/src")
+    val pluginId = rootProject.group.toString()
+    val pluginGroup = project(":compiler-plugin").group.toString()
+    val pluginName = project(":compiler-plugin").name
+    val pluginVersion = project(":compiler-plugin").version.toString()
+    inputs.property("pluginId", pluginId)
+    inputs.property("pluginGroup", pluginGroup)
+    inputs.property("pluginName", pluginName)
+    inputs.property("pluginVersion", pluginVersion)
+    outputs.dir(outputDir)
+    doLast {
+        val dir = outputDir.get().asFile.resolve("dev/songzh/function/trace")
+        dir.mkdirs()
+        dir.resolve("BuildConfig.kt").writeText(
+            """
+            package dev.songzh.function.trace
+
+            internal object BuildConfig {
+                const val KOTLIN_PLUGIN_ID: String = "$pluginId"
+                const val KOTLIN_PLUGIN_GROUP: String = "$pluginGroup"
+                const val KOTLIN_PLUGIN_NAME: String = "$pluginName"
+                const val KOTLIN_PLUGIN_VERSION: String = "$pluginVersion"
+            }
+            """.trimIndent()
+        )
+    }
+}
+
+tasks.named("compileKotlin") { dependsOn(generateBuildConfig) }
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+    }
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    sourceCompatibility = "11"
+    targetCompatibility = "11"
+}
+
 dependencies {
     implementation(kotlin("gradle-plugin-api"))
 
     testImplementation(kotlin("test-junit5"))
-}
-
-buildConfig {
-    packageName(project.group.toString())
-
-    buildConfigField("String", "KOTLIN_PLUGIN_ID", "\"${rootProject.group}\"")
-
-    val pluginProject = project(":compiler-plugin")
-    buildConfigField("String", "KOTLIN_PLUGIN_GROUP", "\"${pluginProject.group}\"")
-    buildConfigField("String", "KOTLIN_PLUGIN_NAME", "\"${pluginProject.name}\"")
-    buildConfigField("String", "KOTLIN_PLUGIN_VERSION", "\"${pluginProject.version}\"")
-
-
 }
 
 gradlePlugin {

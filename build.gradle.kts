@@ -1,12 +1,9 @@
 plugins {
-    kotlin("multiplatform") version "2.1.20" apply false
     kotlin("jvm") version "2.1.20" apply false
-    id("com.github.gmazzo.buildconfig") version "5.6.5"
-    id("org.jetbrains.kotlinx.binary-compatibility-validator") version "0.16.3" apply false
-    id("maven-publish")
+    `maven-publish`
 }
 
 allprojects {
     group = "dev.songzh.function.trace"
-    version = "0.2.0"
+    version = "0.3.0"
 }
