@@ -1,3 +1,8 @@
+import java.io.BufferedOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
+
 plugins {
     kotlin("jvm")
     id("java-gradle-plugin")
@@ -46,6 +51,58 @@ val generateBuildConfig by tasks.registering {
 }
 
 tasks.named("compileKotlin") { dependsOn(generateBuildConfig) }
+
+// ---------------------------------------------------------------------------
+// Gradle 7.x compatibility: strip the Kotlin 2.x .kotlin_module header
+//
+// Kotlin 2.x prepends a 20-byte binary version header to every .kotlin_module
+// file before the protobuf payload.  Gradle 7.6.3 bundles Kotlin 1.7.10 as
+// its Kotlin DSL compiler, which reads plugin JARs on the build-script
+// classpath and tries to parse .kotlin_module directly as raw protobuf.
+// Because the first byte of the new header is 0x00 (protobuf field number 0
+// is invalid), the parse fails with:
+//   "Protocol message contained an invalid tag (zero)."
+//
+// Fix: in a doLast action on the jar task, rewrite the JAR and strip the
+// 20-byte header from any embedded .kotlin_module files so the file starts
+// with a valid protobuf tag — exactly what Kotlin 1.7.x expects.
+// The header is detected by its magic: first 4 bytes == 0x00 0x00 0x00 0x03.
+// ---------------------------------------------------------------------------
+
+/** Strips the 20-byte Kotlin 2.x version header if present, returning the raw protobuf payload. */
+fun stripKotlin2xHeader(bytes: ByteArray): ByteArray =
+    if (bytes.size >= 20 &&
+        bytes[0] == 0x00.toByte() && bytes[1] == 0x00.toByte() &&
+        bytes[2] == 0x00.toByte() && bytes[3] == 0x03.toByte()
+    ) bytes.copyOfRange(20, bytes.size) else bytes
+
+tasks.named<Jar>("jar") {
+    doLast {
+        val jarFile = archiveFile.get().asFile
+        val tmpFile = temporaryDir.resolve("patched-for-gradle7.jar")
+
+        ZipFile(jarFile).use { zip ->
+            ZipOutputStream(BufferedOutputStream(tmpFile.outputStream())).use { out ->
+                for (entry in zip.entries().asSequence()) {
+                    val original = zip.getInputStream(entry).readBytes()
+                    val patched = if (entry.name.endsWith(".kotlin_module")) {
+                        stripKotlin2xHeader(original).also { stripped ->
+                            if (stripped !== original)
+                                logger.lifecycle("Patched ${entry.name}: stripped 20-byte Kotlin 2.x header for Gradle 7.x compatibility")
+                        }
+                    } else original
+
+                    out.putNextEntry(ZipEntry(entry.name))
+                    out.write(patched)
+                    out.closeEntry()
+                }
+            }
+        }
+
+        jarFile.delete()
+        tmpFile.renameTo(jarFile)
+    }
+}
 
 kotlin {
     compilerOptions {

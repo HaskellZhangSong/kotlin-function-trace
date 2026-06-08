@@ -32,8 +32,8 @@ class FunctionTracerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         return project.provider {
             val extension = project.extensions.getByType(FunctionTracerGradleExtension::class.java)
             listOf(
-                SubpluginOption(key = "traceAll", value = extension.traceAll.get().toString()),
-                SubpluginOption(key = "packagePath", value = extension.packagePath.get()),
+                SubpluginOption(key = "traceAll", value = extension.traceAll.toString()),
+                SubpluginOption(key = "packagePath", value = extension.packagePath),
             )
         }
     }
