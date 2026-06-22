@@ -11,13 +11,16 @@ import org.jetbrains.kotlin.ir.declarations.IrConstructor
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrPackageFragment
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
+import org.jetbrains.kotlin.ir.expressions.IrBlock
 import org.jetbrains.kotlin.ir.expressions.IrBlockBody
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrConst
 import org.jetbrains.kotlin.ir.expressions.IrConstKind
+import org.jetbrains.kotlin.ir.expressions.IrContainerExpression
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrExpressionBody
 import org.jetbrains.kotlin.ir.expressions.IrReturn
+import org.jetbrains.kotlin.ir.expressions.IrReturnableBlock
 // Wildcard import is intentional: it brings in top-level factory extensions from BuildersKt
 // (IrCallImpl.fromSymbolOwner, IrBlockImpl, IrReturnImpl, etc.) that are not available through
 // individual class imports in Kotlin 2.1.
@@ -123,6 +126,14 @@ class FunctionTracerTransformer(
                 }
             }
             is IrExpressionBody -> {
+                // Run ReturnWrapper on the expression BEFORE building the instrumented
+                // block.  This ensures that any IrReturn nodes that target this function
+                // and are buried inside an inlined lambda (e.g. `fun foo() = run { return 42 }`)
+                // already have _funcTraceExit embedded in them.  Without this step the
+                // return would fire before the exit-trace call that
+                // buildInstrumentedBlockFromExpression would add after the expression.
+                val wrapper = ReturnWrapper(declaration.symbol, declaration, functionName)
+                body.transformChildrenVoid(wrapper)
                 declaration.body = buildInstrumentedBlockFromExpression(
                     declaration, functionName, body.expression
                 )
@@ -170,19 +181,37 @@ class FunctionTracerTransformer(
         IrConstImpl(UNDEFINED_OFFSET, UNDEFINED_OFFSET, irBuiltIns.stringType, IrConstKind.String, value)
 
     /**
+     * Returns `true` when this expression is an [IrContainerExpression] whose
+     * last element is **not** an [IrExpression] (e.g. an [IrVariable] declaration).
+     *
+     * Kotlin/Native's LLVM codegen asserts `value.type.isUnit()` inside
+     * `evaluateContainerExpression` when the last element is a statement rather
+     * than an expression.  Placing such a container in *value position* (e.g. as
+     * the initialiser of a `val _traceResult = …`) therefore crashes the compiler.
+     */
+    private fun IrExpression.endsWithNonExpressionStatement(): Boolean =
+        this is IrContainerExpression &&
+            statements.isNotEmpty() &&
+            statements.last() !is IrExpression
+
+    /**
      * Converts an expression-body function into an instrumented block body.
      *
-     * Non-Unit:
+     * Nothing (diverges — throw / TODO()):
      *   _funcTraceEnter("name")
-     *   val _traceResult = <expr>
-     *   _funcTraceExit("name")
-     *   return _traceResult
+     *   <expr>          ← exits via exception; everything below is unreachable
      *
-     * Unit:
+     * Unit  —OR—  container ending with a non-expression statement:
      *   _funcTraceEnter("name")
      *   <expr>
      *   _funcTraceExit("name")
      *   return Unit
+     *
+     * Normal non-Unit:
+     *   _funcTraceEnter("name")
+     *   val _traceResult = <expr>
+     *   _funcTraceExit("name")
+     *   return _traceResult
      */
     private fun buildInstrumentedBlockFromExpression(
         function: IrSimpleFunction,
@@ -192,41 +221,56 @@ class FunctionTracerTransformer(
         val newBody = pluginContext.irFactory.createBlockBody(UNDEFINED_OFFSET, UNDEFINED_OFFSET)
         newBody.statements.add(buildTraceCall(functionName, EntryOrExit.ENTRY))
 
-        if (expression.type == irBuiltIns.unitType) {
-            newBody.statements.add(expression)
-            newBody.statements.add(buildTraceCall(functionName, EntryOrExit.EXIT))
-            newBody.statements.add(
-                IrReturnImpl(
-                    UNDEFINED_OFFSET, UNDEFINED_OFFSET,
-                    irBuiltIns.nothingType,
-                    function.symbol,
-                    IrGetObjectValueImpl(
-                        UNDEFINED_OFFSET, UNDEFINED_OFFSET,
-                        irBuiltIns.unitType,
-                        irBuiltIns.unitClass,
-                    ),
-                )
-            )
-        } else {
-            val tempVar = buildVariable(
-                parent = function,
-                startOffset = UNDEFINED_OFFSET,
-                endOffset = UNDEFINED_OFFSET,
-                origin = IrDeclarationOrigin.DEFINED,
-                name = Name.identifier("_traceResult"),
-                type = expression.type,
-            ).also { it.initializer = expression }
+        when {
+            // Diverging expression (throw, TODO(), call to a Nothing-returning fun).
+            // Everything after it is unreachable — don't emit exit or return.
+            expression.type == irBuiltIns.nothingType -> {
+                newBody.statements.add(expression)
+            }
 
-            newBody.statements.add(tempVar)
-            newBody.statements.add(buildTraceCall(functionName, EntryOrExit.EXIT))
-            newBody.statements.add(
-                IrReturnImpl(
-                    UNDEFINED_OFFSET, UNDEFINED_OFFSET,
-                    irBuiltIns.nothingType,
-                    function.symbol,
-                    IrGetValueImpl(UNDEFINED_OFFSET, UNDEFINED_OFFSET, tempVar.type, tempVar.symbol),
+            // Unit expression, OR a container expression whose last element is a
+            // declaration (IrVariable etc.) rather than an IrExpression.
+            // The latter cannot be placed in value position on Kotlin/Native without
+            // triggering `assert(value.type.isUnit())` in evaluateContainerExpression.
+            expression.type == irBuiltIns.unitType || expression.endsWithNonExpressionStatement() -> {
+                newBody.statements.add(expression)
+                newBody.statements.add(buildTraceCall(functionName, EntryOrExit.EXIT))
+                newBody.statements.add(
+                    IrReturnImpl(
+                        UNDEFINED_OFFSET, UNDEFINED_OFFSET,
+                        irBuiltIns.nothingType,
+                        function.symbol,
+                        IrGetObjectValueImpl(
+                            UNDEFINED_OFFSET, UNDEFINED_OFFSET,
+                            irBuiltIns.unitType,
+                            irBuiltIns.unitClass,
+                        ),
+                    )
                 )
-            )
+            }
+
+            // Normal non-Unit expression: capture the result, emit exit, return.
+            else -> {
+                val tempVar = buildVariable(
+                    parent = function,
+                    startOffset = UNDEFINED_OFFSET,
+                    endOffset = UNDEFINED_OFFSET,
+                    origin = IrDeclarationOrigin.DEFINED,
+                    name = Name.identifier("_traceResult"),
+                    type = expression.type,
+                ).also { it.initializer = expression }
+
+                newBody.statements.add(tempVar)
+                newBody.statements.add(buildTraceCall(functionName, EntryOrExit.EXIT))
+                newBody.statements.add(
+                    IrReturnImpl(
+                        UNDEFINED_OFFSET, UNDEFINED_OFFSET,
+                        irBuiltIns.nothingType,
+                        function.symbol,
+                        IrGetValueImpl(UNDEFINED_OFFSET, UNDEFINED_OFFSET, tempVar.type, tempVar.symbol),
+                    )
+                )
+            }
         }
         return newBody
     }
@@ -244,9 +288,74 @@ class FunctionTracerTransformer(
         /** `true` once we have successfully wrapped at least one [IrReturn]. */
         var wrappedAnyReturn = false
 
-        // Do NOT recurse into nested function / constructor bodies.
-        override fun visitSimpleFunction(declaration: IrSimpleFunction): IrStatement = declaration
+        // Do NOT recurse into constructor bodies — their IrReturn nodes target
+        // the constructor symbol, not our function.
         override fun visitConstructor(declaration: IrConstructor): IrStatement = declaration
+
+        // ── IrReturnableBlock handling ────────────────────────────────────────
+        //
+        // K2 inlines `run { return 42 }` into an IrReturnableBlock *before*
+        // our plugin runs.  The IrReturn inside the block targets the *block*
+        // symbol, not the function symbol, so the normal visitReturn check in
+        // ReturnWrapper misses it.
+        //
+        // When the block can NEVER fall through to normal completion (every
+        // path ends with a diverging expression, such as an IrReturn), K2's
+        // JVM codegen emits a plain `ireturn` for the IrReturn — making any
+        // code inserted AFTER the block (e.g. our `exit_outer`) unreachable.
+        //
+        // In that case we inject the trace exit *inside* the block, just
+        // before the IrReturn that exits it, via a sub-wrapper whose
+        // targetSymbol is the block's own symbol.
+        //
+        // When the block CAN fall through (e.g. `run { if(cond) return 10; 20 }`),
+        // K2 uses a flag mechanism that does not bypass post-block code, so
+        // the outer exit call added by buildInstrumentedBlockFromExpression /
+        // the outer IrReturn wrapper is reachable and we leave the block alone.
+        //
+        // Override BOTH visitReturnableBlock and visitBlock to stay safe across
+        // K2 minor versions that may or may not delegate one to the other.
+
+        private fun IrReturnableBlock.couldFallThrough(): Boolean {
+            // Nothing-typed block by declaration → never falls through.
+            if (type == irBuiltIns.nothingType) return false
+            val last = statements.lastOrNull() ?: return true
+            // If the last element is a diverging expression (IrReturn, throw,
+            // TODO() etc.), the block has no fall-through path.
+            if (last is IrExpression && last.type == irBuiltIns.nothingType) return false
+            return true
+        }
+
+        private fun handleReturnableBlock(expression: IrReturnableBlock): IrExpression {
+            if (!expression.couldFallThrough()) {
+                // Block never falls through — exiting it IS exiting the function.
+                // Inject exit before the IrReturn(s) that exit the block.
+                val subWrapper = ReturnWrapper(expression.symbol, targetFunction, functionName)
+                expression.transformChildrenVoid(subWrapper)
+                if (subWrapper.wrappedAnyReturn) wrappedAnyReturn = true
+                return expression
+            }
+            // Block could fall through: recurse normally so inner IrReturn nodes
+            // are still visited (they target the block symbol, not our function,
+            // so visitReturn will leave them alone, but they still need to be
+            // traversed in case there are nested ReturnableBlocks).
+            expression.transformChildrenVoid(this)
+            return expression
+        }
+
+        override fun visitReturnableBlock(expression: IrReturnableBlock): IrExpression {
+            System.err.println(
+                "[FunctionTracer] visitReturnableBlock fn=$functionName " +
+                "type=${expression.type} couldFallThrough=${expression.couldFallThrough()} " +
+                "lastStmt=${expression.statements.lastOrNull()?.let { s -> s::class.simpleName + " type=" + ((s as? IrExpression)?.type ?: "n/a") }}"
+            )
+            return handleReturnableBlock(expression)
+        }
+
+        override fun visitBlock(expression: IrBlock): IrExpression {
+            if (expression is IrReturnableBlock) return handleReturnableBlock(expression)
+            return super.visitBlock(expression)
+        }
 
         override fun visitReturn(expression: IrReturn): IrExpression {
             if (expression.returnTargetSymbol != targetSymbol) {
@@ -256,13 +365,14 @@ class FunctionTracerTransformer(
             val originalValue = expression.value
             wrappedAnyReturn = true
 
-            // Unit return: emit the exit trace BEFORE the return, keep return untouched.
-            //
-            //   IrBlock<Nothing> {
-            //       _funcTraceExit("name")
-            //       IrReturn(Unit)
-            //   }
-            if (originalValue.type == irBuiltIns.unitType) {
+            // Unit return, OR a container whose last element is a declaration
+            // (not an expression): both must stay in statement position.
+            // Emit exit BEFORE the return; do NOT try to capture the value
+            // into a temp variable (that would place the container in value
+            // position and crash Kotlin/Native's LLVM codegen).
+            if (originalValue.type == irBuiltIns.unitType ||
+                originalValue.endsWithNonExpressionStatement()
+            ) {
                 val block = IrBlockImpl(UNDEFINED_OFFSET, UNDEFINED_OFFSET, irBuiltIns.nothingType)
                 block.statements.add(buildTraceCall(functionName, EntryOrExit.EXIT))
                 block.statements.add(expression)
