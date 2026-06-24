@@ -114,14 +114,32 @@ class FunctionTracerTransformer(
 
         when (val body = declaration.body) {
             is IrBlockBody -> {
-                // Step 1 – wrap every IrReturn so exit trace fires just before the return.
-                val wrapper = ReturnWrapper(declaration.symbol, declaration, functionName)
-                body.transformChildrenVoid(wrapper)
+                // Step 1 – insert exit trace before every IrReturn, working directly
+                // in the statement list (flat expansion) rather than wrapping returns
+                // in new IrBlock(Nothing) nodes.
+                //
+                // WHY FLAT:  our plugin runs before the Compose compiler.  When Compose
+                // later processes a @Composable function it "hoists" every IrReturn it
+                // finds: it replaces the IrReturn *wherever it is* with a temp-var
+                // assignment, then emits cleanup + RETURN as siblings at the outer
+                // IrBlockBody level.  If the IrReturn was buried inside our
+                // IrBlock(Nothing) wrapper, Compose moves it out but leaves the block
+                // ending with the extracted VAR declaration.  A Nothing-typed
+                // IrContainerExpression whose last element is not an IrExpression then
+                // triggers `assert(value.type.isUnit())` in
+                // Kotlin/Native's evaluateContainerExpression.
+                //
+                // Flat expansion avoids the IrBlock wrapper entirely:
+                //   val _traceResult = <value>   <- plain statement
+                //   _funcTraceExit(...)           <- plain statement
+                //   return _traceResult           <- plain statement, Compose can hoist it
+                val wrappedAny = flatInstrumentReturns(
+                    body.statements, declaration.symbol, declaration, functionName
+                )
                 // Step 2 – prepend the entry trace.
                 body.statements.add(0, buildTraceCall(functionName, EntryOrExit.ENTRY))
-                // Step 3 – fallback for Unit functions that have no IrReturn to wrap
-                // (e.g. native entry-point main on Kotlin/Native).
-                if (!wrapper.wrappedAnyReturn && declaration.returnType == irBuiltIns.unitType) {
+                // Step 3 – fallback for Unit functions with no IrReturn at all.
+                if (!wrappedAny && declaration.returnType == irBuiltIns.unitType) {
                     body.statements.add(buildTraceCall(functionName, EntryOrExit.EXIT))
                 }
             }
@@ -273,6 +291,105 @@ class FunctionTracerTransformer(
             }
         }
         return newBody
+    }
+
+    /**
+     * Instruments every [IrReturn] targeting [target] that appears in a **statement
+     * position** inside [stmts] (and recursively inside nested
+     * [IrContainerExpression] children that are themselves in statement position).
+     *
+     * Unlike [ReturnWrapper], this helper expands each return *in-place* — inserting
+     * the temp-var and exit call as sibling statements — instead of wrapping them in
+     * a new `IrBlock(Nothing)` node.  This is safe for Compose because Compose's own
+     * IR transformer can then hoist `RETURN _traceResult` from the flat statement
+     * list without creating an orphaned variable reference (scope escape).
+     *
+     * For returns in *expression* positions (e.g. inside [IrWhen] branch results or
+     * [IrTry] bodies) we fall back to [ReturnWrapper], which wraps them in an
+     * `IrBlock(Nothing)`.  Those positions are handled correctly by Compose.
+     *
+     * @return `true` if at least one return was instrumented.
+     */
+    private fun flatInstrumentReturns(
+        stmts: MutableList<IrStatement>,
+        target: IrReturnTargetSymbol,
+        fn: IrSimpleFunction,
+        name: String,
+    ): Boolean {
+        var wrapped = false
+        var i = 0
+        while (i < stmts.size) {
+            val s = stmts[i]
+            when {
+                // ── IrReturn targeting our function ──────────────────────────
+                s is IrReturn && s.returnTargetSymbol == target -> {
+                    val v = s.value
+                    if (v.type == irBuiltIns.unitType || v.endsWithNonExpressionStatement()) {
+                        // Unit / non-expr-container: just insert exit before the return.
+                        stmts.add(i, buildTraceCall(name, EntryOrExit.EXIT))
+                        i += 2   // advance past [exit, return]
+                    } else {
+                        // Non-Unit: expand to [tempVar, exit, return(tempVar)] inline.
+                        val tmp = buildVariable(
+                            parent = fn,
+                            startOffset = UNDEFINED_OFFSET,
+                            endOffset = UNDEFINED_OFFSET,
+                            origin = IrDeclarationOrigin.DEFINED,
+                            name = Name.identifier("_traceResult"),
+                            type = v.type,
+                        ).also { it.initializer = v }
+
+                        // Replace the original return with one that reads the temp.
+                        stmts[i] = IrReturnImpl(
+                            s.startOffset, s.endOffset, s.type,
+                            s.returnTargetSymbol,
+                            IrGetValueImpl(UNDEFINED_OFFSET, UNDEFINED_OFFSET, tmp.type, tmp.symbol),
+                        )
+                        // Insert [tempVar, exit] before the now-modified return.
+                        stmts.add(i, buildTraceCall(name, EntryOrExit.EXIT))
+                        stmts.add(i, tmp)
+                        i += 3   // advance past [tmp, exit, return]
+                    }
+                    wrapped = true
+                }
+
+                // ── IrReturnableBlock in statement position ───────────────────
+                // K2 represents `run { … }` / other inline-lambda calls as an
+                // IrReturnableBlock *before* the inliner runs.  Returns inside the
+                // block target the block's own symbol, not the outer function.
+                // For non-fallthrough blocks (Nothing type), exiting the block IS
+                // exiting the function, so recurse with the block's symbol.
+                s is IrReturnableBlock -> {
+                    val neverFallsThrough =
+                        s.type == irBuiltIns.nothingType ||
+                        s.statements.lastOrNull().let { last ->
+                            last is IrExpression && last.type == irBuiltIns.nothingType
+                        }
+                    val innerTarget = if (neverFallsThrough) s.symbol else target
+                    if (flatInstrumentReturns(s.statements, innerTarget, fn, name)) wrapped = true
+                    i++
+                }
+
+                // ── Plain IrBlock / IrComposite in statement position ─────────
+                s is IrContainerExpression -> {
+                    if (flatInstrumentReturns(s.statements, target, fn, name)) wrapped = true
+                    i++
+                }
+
+                // ── IrWhen, IrTry, loops, etc. ────────────────────────────────
+                // Returns inside these constructs are in *expression* positions
+                // (branch results, catch bodies).  Use ReturnWrapper for those —
+                // the IrBlock(Nothing) wrapper it creates is safe in expression
+                // position and Compose does not hoist returns from there.
+                else -> {
+                    val rw = ReturnWrapper(target, fn, name)
+                    s.transformChildrenVoid(rw)
+                    if (rw.wrappedAnyReturn) wrapped = true
+                    i++
+                }
+            }
+        }
+        return wrapped
     }
 
     // -------------------------------------------------------------------------
